@@ -186,9 +186,13 @@ try {
                                     $pct = [math]::Min(100, $done * 100.0 / $size)
                                     $sec = [math]::Max(0.5, ($now - $t0).TotalSeconds)
                                     $bps = ($done - $start) / $sec
-                                    $eta = if ($bps -gt 0) { [TimeSpan]::FromSeconds([math]::Round(($size - $done) / $bps)) } else { [TimeSpan]::Zero }
                                     $bar = ('#' * [int]($pct / 2.5)).PadRight(40, '-')
-                                    $line = '  [{0}] {1,5:N1}%  {2}/{3} {4}  {5:N1} {6}  {7} {8:hh\:mm\:ss}' -f $bar, $pct, [math]::Round($done / 1MB), [math]::Round($size / 1MB), $T.mb, ($bps / 1MB), $T.speed, $T.left, $eta
+                                    # первые 2 секунды скорость ещё не известна - не показываем ерунду
+                                    if ($sec -ge 2 -and $bps -gt 0) {
+                                        $eta = [TimeSpan]::FromSeconds([math]::Round(($size - $done) / $bps))
+                                        $tail = '{0:N1} {1}  {2} {3:hh\:mm\:ss}' -f ($bps / 1MB), $T.speed, $T.left, $eta
+                                    } else { $tail = '' }
+                                    $line = ('  [{0}] {1,5:N1}%  {2}/{3} {4}  {5}' -f $bar, $pct, [math]::Round($done / 1MB), [math]::Round($size / 1MB), $T.mb, $tail).PadRight(96)
                                     Write-Host ("`r" + $line) -NoNewline -ForegroundColor Green
                                 }
                             }
