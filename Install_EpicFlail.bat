@@ -261,11 +261,26 @@ try {
     }
     if (-not (Test-Path $exe)) { throw "$ExeName not found in $dir" }
 
-    # ---------- 6. системные библиотеки (если их нет) ----------
-    $sys = Join-Path $env:WINDIR 'System32'
-    if (-not ((Test-Path (Join-Path $sys 'vcruntime140_1.dll')) -and (Test-Path (Join-Path $sys 'msvcp140.dll')))) {
+    # ---------- 6. системные библиотеки Microsoft Visual C++ 2015-2022 (x64) ----------
+    # Игре на Unreal 5.8 нужен СВЕЖИЙ Visual C++. Наличие vcruntime140_1.dll ничего не говорит: у друга 22.11.2026
+    # файлы были (старая версия), а игра при запуске просила установку. Поэтому смотрим версию в реестре.
+    $vcOk = $false
+    try {
+        $k = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64' -ErrorAction Stop
+        if ($k.Installed -eq 1 -and [int]$k.Major -eq 14 -and [int]$k.Minor -ge 44) { $vcOk = $true }
+    } catch {}
+    if (-not $vcOk) {
+        Stage $T.prereq
         $pre = Get-ChildItem -LiteralPath $dir -Recurse -Filter 'UEPrereqSetup_x64.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($pre) { Stage $T.prereq; Start-Process -FilePath $pre.FullName -ArgumentList '/quiet', '/norestart' -Verb RunAs -Wait }
+        if ($pre) {
+            Start-Process -FilePath $pre.FullName -ArgumentList '/quiet', '/norestart' -Verb RunAs -Wait
+        } else {
+            # в сборке нет установщика Unreal - берём официальный с сайта Microsoft (всегда последняя версия)
+            $vc = Join-Path $env:TEMP 'vc_redist.x64.exe'
+            Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile $vc -UseBasicParsing -TimeoutSec 300
+            Start-Process -FilePath $vc -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait
+            Remove-Item $vc -Force -ErrorAction SilentlyContinue
+        }
     }
 
     # ---------- 7. ярлыки ----------
