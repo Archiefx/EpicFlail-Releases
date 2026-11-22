@@ -271,8 +271,12 @@ try {
     } catch {}
     if (-not $vcOk) {
         Stage $T.prereq
+        # в сборке (флаг -prereqs) лежит Engine\Extras\Redist\en-us\vc_redist.x64.exe - официальный установщик Microsoft
+        $vcIn = Get-ChildItem -LiteralPath $dir -Recurse -Filter 'vc_redist.x64.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
         $pre = Get-ChildItem -LiteralPath $dir -Recurse -Filter 'UEPrereqSetup_x64.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($pre) {
+        if ($vcIn) {
+            Start-Process -FilePath $vcIn.FullName -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait
+        } elseif ($pre) {
             Start-Process -FilePath $pre.FullName -ArgumentList '/quiet', '/norestart' -Verb RunAs -Wait
         } else {
             # в сборке нет установщика Unreal - берём официальный с сайта Microsoft (всегда последняя версия)
