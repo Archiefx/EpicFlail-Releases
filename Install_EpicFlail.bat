@@ -261,31 +261,49 @@ try {
     }
     if (-not (Test-Path $exe)) { throw "$ExeName not found in $dir" }
 
-    # ---------- 6. системные библиотеки Microsoft Visual C++ 2015-2022 (x64) ----------
-    # Игре на Unreal 5.8 нужен СВЕЖИЙ Visual C++. Наличие vcruntime140_1.dll ничего не говорит: у друга 22.11.2026
-    # файлы были (старая версия), а игра при запуске просила установку. Поэтому смотрим версию в реестре.
-    $vcOk = $false
-    try {
-        $k = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64' -ErrorAction Stop
-        if ($k.Installed -eq 1 -and [int]$k.Major -eq 14 -and [int]$k.Minor -ge 44) { $vcOk = $true }
-    } catch {}
-    if (-not $vcOk) {
+    # ---------- 6. системные библиотеки Microsoft Visual C++ (x64) - ВСЕГДА самая свежая версия ----------
+    # Игре на Unreal 5.8 нужен свежий Visual C++. Наличие vcruntime140_1.dll ничего не говорит: у друга 22.11.2026
+    # файлы были (старая версия), а игра при запуске просила установку. Поэтому (24.11.2026, правило Артура:
+    # "с установкой vc_redist.x64.exe последней версии") каждый запуск установщика:
+    #   1) берёт с сайта Microsoft последний vc_redist.x64.exe по постоянной ссылке aka.ms/vc14 (она всегда ведёт на
+    #      самую новую версию v14; старая ссылка aka.ms/vs/17 застряла на 14.44);
+    #   2) сравнивает его версию с установленной (реестр) и ставит, только если скачанный новее (или ничего нет);
+    #   3) нет интернета - ставит тот, что лежит в сборке игры (если установленного нет совсем).
+    function VcInstalled {
+        try {
+            $k = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64' -ErrorAction Stop
+            if ($k.Installed -eq 1) { return [version]('{0}.{1}.{2}' -f $k.Major, $k.Minor, $k.Bld) }
+        } catch {}
+        return $null
+    }
+    $have = VcInstalled
+    $vc = Join-Path $env:TEMP 'EpicFlail_vc_redist.x64.exe'
+    $fresh = $null
+    foreach ($url in @('https://aka.ms/vc14/vc_redist.x64.exe', 'https://aka.ms/vs/17/release/vc_redist.x64.exe')) {
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $vc -UseBasicParsing -TimeoutSec 300
+            $fv = (Get-Item $vc).VersionInfo
+            $fresh = [version]('{0}.{1}.{2}' -f $fv.FileMajorPart, $fv.FileMinorPart, $fv.FileBuildPart)
+            break
+        } catch { $fresh = $null }
+    }
+    if ($fresh -and (-not $have -or $fresh -gt $have)) {
+        Stage ($T.prereq + '  (' + $(if ($have) { $have } else { '-' }) + ' -> ' + $fresh + ')')
+        $p = Start-Process -FilePath $vc -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait -PassThru
+        # 0 - поставлено, 3010 - поставлено, нужна перезагрузка, 1638 - уже стоит такая или новее
+        if ($p.ExitCode -notin @(0, 3010, 1638)) { Say ('  Visual C++: code ' + $p.ExitCode) 'Yellow' }
+    } elseif (-not $fresh -and -not $have) {
+        # нет связи с Microsoft и ничего не установлено - ставим то, что лежит в сборке (флаг -prereqs)
         Stage $T.prereq
-        # в сборке (флаг -prereqs) лежит Engine\Extras\Redist\en-us\vc_redist.x64.exe - официальный установщик Microsoft
         $vcIn = Get-ChildItem -LiteralPath $dir -Recurse -Filter 'vc_redist.x64.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
         $pre = Get-ChildItem -LiteralPath $dir -Recurse -Filter 'UEPrereqSetup_x64.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($vcIn) {
             Start-Process -FilePath $vcIn.FullName -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait
         } elseif ($pre) {
             Start-Process -FilePath $pre.FullName -ArgumentList '/quiet', '/norestart' -Verb RunAs -Wait
-        } else {
-            # в сборке нет установщика Unreal - берём официальный с сайта Microsoft (всегда последняя версия)
-            $vc = Join-Path $env:TEMP 'vc_redist.x64.exe'
-            Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile $vc -UseBasicParsing -TimeoutSec 300
-            Start-Process -FilePath $vc -ArgumentList '/install', '/quiet', '/norestart' -Verb RunAs -Wait
-            Remove-Item $vc -Force -ErrorAction SilentlyContinue
         }
     }
+    Remove-Item $vc -Force -ErrorAction SilentlyContinue
 
     # ---------- 7. ярлыки ----------
     $ws = New-Object -ComObject WScript.Shell
